@@ -132,14 +132,20 @@ def build_cnn(input_var=None):
     # Fully-connected layer
     network = lasagne.layers.DenseLayer(
             network,
-            num_units=800,
+            num_units=500,
             nonlinearity=lasagne.nonlinearities.rectify)
+
+  network = lasagne.layers.DenseLayer(
+            network,
+            num_units=500,
+            nonlinearity=lasagne.nonlinearities.rectify)
+
 
     # 30-unit output layer
     network = lasagne.layers.DenseLayer(
             network,
             num_units=30,
-            nonlinearity=lasagne.nonlinearities.softmax)
+            nonlinearity=None)
 
     return network
 
