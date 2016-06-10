@@ -30,7 +30,7 @@ def load(test = False, cols = None):
 	if cols:
 		df = df[list(cols) + ['Image']]
 
-	print (df.count()) #print nb of value for each column
+	#print (df.count()) #print nb of value for each column
 	df = df.dropna() #drop all rows with missing values
 
 	X = np.vstack(df['Image'].values) / 255.0  # Scale pixel values to [0,1]
@@ -63,6 +63,12 @@ def load2d(test = False, clos = None):
     X_val = X_val.reshape(-1,1,96,96)
     return X_train, y_train, X_val, y_val
 
+def plot_sample(x, y, axis):
+    img = x.reshape(96,96)
+    axis.imshow(img, cmap='gray')
+    axis.scatter(y[0::2] * 48 + 48, y[1::2] * 48 + 48, marker='x', s=10)    
+
+
 
 def build_simplelp(input_var=None):
     # This creates an simple perceptron of one hidden layer
@@ -91,44 +97,47 @@ def build_simplelp(input_var=None):
 
 
 def build_cnn(input_var=None):
-    # As a third model, we'll create a CNN of two convolution + pooling stages
+    # CNN of two convolution + pooling stages
     # and a fully-connected hidden layer in front of the output layer.
 
-    # Input layer, as usual:
+    # Input layer:
     network = lasagne.layers.InputLayer(shape=(None, 1, 96, 96),
                                         input_var=input_var)
-    # This time we do not apply input dropout, as it tends to work less well
-    # for convolutional layers.
 
-    # Convolutional layer with 32 kernels of size 5x5. Strided and padded
-    # convolutions are supported as well; see the docstring.
+
     network = lasagne.layers.Conv2DLayer(
-            network, num_filters=32, filter_size=(5, 5),
+            network, num_filters=32, filter_size=(3, 3),
             nonlinearity=lasagne.nonlinearities.rectify,
             W=lasagne.init.GlorotUniform())
-    # Expert note: Lasagne provides alternative convolutional layers that
-    # override Theano's choice of which implementation to use; for details
-    # please see http://lasagne.readthedocs.org/en/latest/user/tutorial.html.
 
-    # Max-pooling layer of factor 2 in both dimensions:
     network = lasagne.layers.MaxPool2DLayer(network, pool_size=(2, 2))
 
-    # Another convolution with 32 5x5 kernels, and another 2x2 pooling:
+
     network = lasagne.layers.Conv2DLayer(
-            network, num_filters=32, filter_size=(5, 5),
-            nonlinearity=lasagne.nonlinearities.rectify)
+            network, num_filters=64, filter_size=(2, 2),
+            nonlinearity=lasagne.nonlinearities.rectify,
+            W=lasagne.init.GlorotUniform())
 
     network = lasagne.layers.MaxPool2DLayer(network, pool_size=(2, 2))
 
-    # A fully-connected layer of 256 units with 50% dropout on its inputs:
+
+    network = lasagne.layers.Conv2DLayer(
+            network, num_filters=128, filter_size=(2, 2),
+            nonlinearity=lasagne.nonlinearities.rectify,
+            W=lasagne.init.GlorotUniform())
+
+    network = lasagne.layers.MaxPool2DLayer(network, pool_size=(2, 2))
+
+
+    # Fully-connected layer
     network = lasagne.layers.DenseLayer(
-            lasagne.layers.dropout(network, p=.5),
-            num_units=512,
+            network,
+            num_units=800,
             nonlinearity=lasagne.nonlinearities.rectify)
 
-    # And, finally, the 10-unit output layer with 50% dropout on its inputs:
+    # 30-unit output layer
     network = lasagne.layers.DenseLayer(
-            lasagne.layers.dropout(network, p=.5),
+            network,
             num_units=30,
             nonlinearity=lasagne.nonlinearities.softmax)
 
