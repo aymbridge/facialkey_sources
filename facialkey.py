@@ -55,6 +55,15 @@ def load(test = False, cols = None):
 	return X_train, y_train, X_val, y_val
 
 
+
+def load2d(test = False, clos = None):
+    """ Load data in 2D for ConvNet """
+    X_train, y_train, X_val, y_val = load(test = test)
+    X_train = X_train.reshape(-1,1,96,96)
+    X_val = X_val.reshape(-1,1,96,96)
+    return X_train, y_train, X_val, y_val
+
+
 def build_simplelp(input_var=None):
     # This creates an simple perceptron of one hidden layer
 
@@ -68,7 +77,7 @@ def build_simplelp(input_var=None):
 
     # Add a fully-connected layer of 800 units, using the linear rectifier, and
     # initializing weights with Glorot's scheme (which is the default anyway):
-    l_hid1 = lasagne.layers.DenseLayer(l_in_drop, num_units=100, nonlinearity=lasagne.nonlinearities.rectify, W=lasagne.init.GlorotUniform())
+    l_hid1 = lasagne.layers.DenseLayer(l_in_drop, num_units=200, nonlinearity=lasagne.nonlinearities.rectify, W=lasagne.init.GlorotUniform())
 
     # We'll now add dropout of 50%:
     l_hid1_drop = lasagne.layers.DropoutLayer(l_hid1, p=0.5)
@@ -79,6 +88,53 @@ def build_simplelp(input_var=None):
     # Each layer is linked to its incoming layer(s), so we only need to pass
     # the output layer to give access to a network in Lasagne:
     return l_out
+
+
+def build_cnn(input_var=None):
+    # As a third model, we'll create a CNN of two convolution + pooling stages
+    # and a fully-connected hidden layer in front of the output layer.
+
+    # Input layer, as usual:
+    network = lasagne.layers.InputLayer(shape=(None, 1, 96, 96),
+                                        input_var=input_var)
+    # This time we do not apply input dropout, as it tends to work less well
+    # for convolutional layers.
+
+    # Convolutional layer with 32 kernels of size 5x5. Strided and padded
+    # convolutions are supported as well; see the docstring.
+    network = lasagne.layers.Conv2DLayer(
+            network, num_filters=32, filter_size=(5, 5),
+            nonlinearity=lasagne.nonlinearities.rectify,
+            W=lasagne.init.GlorotUniform())
+    # Expert note: Lasagne provides alternative convolutional layers that
+    # override Theano's choice of which implementation to use; for details
+    # please see http://lasagne.readthedocs.org/en/latest/user/tutorial.html.
+
+    # Max-pooling layer of factor 2 in both dimensions:
+    network = lasagne.layers.MaxPool2DLayer(network, pool_size=(2, 2))
+
+    # Another convolution with 32 5x5 kernels, and another 2x2 pooling:
+    network = lasagne.layers.Conv2DLayer(
+            network, num_filters=32, filter_size=(5, 5),
+            nonlinearity=lasagne.nonlinearities.rectify)
+
+    network = lasagne.layers.MaxPool2DLayer(network, pool_size=(2, 2))
+
+    # A fully-connected layer of 256 units with 50% dropout on its inputs:
+    network = lasagne.layers.DenseLayer(
+            lasagne.layers.dropout(network, p=.5),
+            num_units=512,
+            nonlinearity=lasagne.nonlinearities.rectify)
+
+    # And, finally, the 10-unit output layer with 50% dropout on its inputs:
+    network = lasagne.layers.DenseLayer(
+            lasagne.layers.dropout(network, p=.5),
+            num_units=30,
+            nonlinearity=lasagne.nonlinearities.softmax)
+
+    return network
+
+
 
 
 ################# Batch iterator ###################
@@ -98,18 +154,19 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
 def main(num_epochs=500):
 	# Load the dataset
     print("Loading data...")
-    X_train, y_train, X_val, y_val = load()
+    X_train, y_train, X_val, y_val = load2d()
 
 	#print("X.shape == {}; X.min == {:.3f}; X.max == {:.3f}".format(X.shape, X.min(), X.max()))
 	#print("y.shape == {}; y.min == {:.3f}; y.max == {:.3f}".format(y.shape, y.min(), y.max()))
 
     # Prepare Theano variables for inputs and targets
-    input_var = T.fmatrix('inputs')
+    #input_var = T.fmatrix('inputs')
+    input_var = T.tensor4('inputs')
     target_var = T.fmatrix('targets')
 
     # Create neural network model
     print("Building model and compiling functions...")
-    network = build_simplelp(input_var)
+    network = build_cnn(input_var)
 
     # Create a loss expression for training
     prediction = lasagne.layers.get_output(network)
@@ -140,6 +197,9 @@ def main(num_epochs=500):
     #val_fn = theano.function([input_var, target_var], [test_loss, test_acc])
     val_fn = theano.function([input_var, target_var], test_loss)
 
+    #Initialize array to strore trainning and validation loss
+    t_loss = np.array(0.0)
+    v_loss = np.array(0.0)
 
    # Launch the training loop.
     print("Starting training...")
@@ -166,11 +226,19 @@ def main(num_epochs=500):
             #val_acc += acc
             val_batches += 1
 
+        train_loss = train_err / train_batches
+        valid_loss = val_err / val_batches
+        np.append(t_loss, train_loss)
+        np.append(v_loss, valid_loss)
+
         # Then we print the results for this epoch:
         print("Epoch {} of {} took {:.3f}s".format(epoch + 1, num_epochs, time.time() - start_time))
-        print("  training loss:\t\t{:.6f}".format(train_err / train_batches))
-        print("  validation loss:\t\t{:.6f}".format(val_err / val_batches))
+        print("  training loss:\t\t{:.6f}".format(train_loss))
+        print("  validation loss:\t\t{:.6f}".format(valid_loss))
         #print("  validation accuracy:\t\t{:.2f} %".format(val_acc / val_batches * 100))
+
+    print t_loss
+    print v_loss
 
     #Save all network parameters after training
     np.savez('model_simple_preceptron.npz', *lasagne.layers.get_all_param_values(network))
@@ -190,8 +258,10 @@ def main(num_epochs=500):
     # print("  test accuracy:\t\t{:.2f} %".format(
     #     test_acc / test_batches * 100))
 
+
+
 if __name__ == '__main__':
-	main(400)
+	main(5)
 	
 
 
