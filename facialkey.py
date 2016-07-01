@@ -19,81 +19,65 @@ FTEST = '~/Documents/Machine_learning/facialkeypoints/datasets/test.csv'
 
 
 def load(test = False, cols = None):
-	""" Loading data for either training or testing """
+    """ Loading data for either training or testing """
+    fname = FTEST if test else FTRAIN 
+    df = read_csv(os.path.expanduser(fname))
 
-	fname = FTEST if test else FTRAIN 
-	df = read_csv(os.path.expanduser(fname))
+    #Image column has pixel values separated by space, convert to numpy array
+    df['Image'] = df['Image'].apply(lambda im: np.fromstring(im, sep=' '))
 
-	#Image column has pixel values separated by space, convert to numpy array
-	df['Image'] = df['Image'].apply(lambda im: np.fromstring(im, sep=' '))
+    if cols:
+    	df = df[list(cols) + ['Image']]
 
-	if cols:
-		df = df[list(cols) + ['Image']]
+    #print (df.count()) #print nb of value for each column
+    df = df.dropna() #drop all rows with missing values
 
-	#print (df.count()) #print nb of value for each column
-	df = df.dropna() #drop all rows with missing values
+    X = np.vstack(df['Image'].values) / 255.0  # Scale pixel values to [0,1]
+    X = X.astype(np.float32) #convert to correct type 
 
-	X = np.vstack(df['Image'].values) / 255.0  # Scale pixel values to [0,1]
-	X = X.astype(np.float32) #convert to correct type 
+    if not test:
+    	y = df[df.columns[:-1]].values #select keypoints as outputs
+    	y = (y - 48) / 48 #scale coordinates to [-1,1]
+    	X, y = shuffle(X, y , random_state=42)
+    	y = y.astype(np.float32)  
+    else:
+        y = None
 
-	if not test:
-		y = df[df.columns[:-1]].values #select keypoints as outputs
-		y = (y - 48) / 48 #scale coordinates to [-1,1]
-		X, y = shuffle(X, y , random_state=42)
-		y = y.astype(np.float32)
-	else:
-		y = None
-
-	#Split data for training and testing(20%) 
-	#X_train, y_train, X_val, y_val, X_test, y_test
-	X_train = X[:1720,:]
-	y_train = y[:1720,:]
-
-	X_val = X[1720:,:] 
-	y_val = y[1720:,:]
-
-	return X_train, y_train, X_val, y_val
+    return X, y 
 
 
 
 def load2d(test = False, clos = None):
     """ Load data in 2D for ConvNet """
-    X_train, y_train, X_val, y_val = load(test = test)
-    X_train = X_train.reshape(-1,1,96,96)
-    X_val = X_val.reshape(-1,1,96,96)
+    X, y = load(test = test)
+    X = X.reshape(-1,1,96,96)
+    return X, y
+
+
+def data_split(X,y, split):
+    #Split data for training and testing according to split
+    #X_train, y_train, X_val, y_val, X_test, y_test
+
+    indice = int(X.shape[0] * (1 - split))
+
+    X_train = X[:indice,:]
+    y_train = y[:indice,:]
+
+    X_val = X[indice:,:] 
+    y_val = y[indice:,:]
+
     return X_train, y_train, X_val, y_val
 
-def plot_sample(x, y, axis):
-    img = x.reshape(96,96)
-    axis.imshow(img, cmap='gray')
-    axis.scatter(y[0::2] * 48 + 48, y[1::2] * 48 + 48, marker='x', s=10)    
 
 
+def ploting_img(X, y):
+    print 'Ploting dat image Bro'
+    plt.imshow(X.reshape(96,96), cmap='Greys_r') 
+    y = y.reshape(15,2)
+    
+    plt.scatter(y[:,0],y[:,1], marker='+')
+    plt.show()
 
-def build_simplelp(input_var=None):
-    # This creates an simple perceptron of one hidden layer
-
-    # Input layer, specifying the expected input shape of the network
-    # (unspecified batchsize, 1 channel, 28 rows and 28 columns) and
-    # linking it to the given Theano variable `input_var`, if any:
-    l_in = lasagne.layers.InputLayer(shape=(None, 9216), input_var=input_var)
-
-    # Apply 20% dropout to the input data:
-    l_in_drop = lasagne.layers.DropoutLayer(l_in, p=0.2)
-
-    # Add a fully-connected layer of 800 units, using the linear rectifier, and
-    # initializing weights with Glorot's scheme (which is the default anyway):
-    l_hid1 = lasagne.layers.DenseLayer(l_in_drop, num_units=200, nonlinearity=lasagne.nonlinearities.rectify, W=lasagne.init.GlorotUniform())
-
-    # We'll now add dropout of 50%:
-    l_hid1_drop = lasagne.layers.DropoutLayer(l_hid1, p=0.5)
-
-    # Finally, we'll add the fully-connected output layer of 30 units:
-    l_out = lasagne.layers.DenseLayer(l_hid1_drop, num_units=30, nonlinearity=None)
-
-    # Each layer is linked to its incoming layer(s), so we only need to pass
-    # the output layer to give access to a network in Lasagne:
-    return l_out
 
 
 def build_cnn(input_var=None):
@@ -135,7 +119,7 @@ def build_cnn(input_var=None):
             num_units=500,
             nonlinearity=lasagne.nonlinearities.rectify)
 
-  network = lasagne.layers.DenseLayer(
+    network = lasagne.layers.DenseLayer(
             network,
             num_units=500,
             nonlinearity=lasagne.nonlinearities.rectify)
@@ -149,6 +133,30 @@ def build_cnn(input_var=None):
 
     return network
 
+
+def image_flip(X, y):
+    """ Image flip for data augmentation """
+
+    #Flipping images 
+    bs = X.shape[0]
+    indices  = np.random.choice(bs, bs/2, replace=False) #Half of the images fliped
+    X[indices] = X[indices,:,:,::-1]
+
+    #Flipping target
+    flip_indices = [
+        (0, 2), (1, 3),
+        (4, 8), (5, 9), (6, 10), (7, 11),
+        (12, 16), (13, 17), (14, 18), (15, 19),
+        (22, 24), (23, 25),
+        ]
+
+    if y is not None:
+        y[indices, ::2] = y[indices, ::2] * -1 #Flip all 
+
+        for a, b in flip_indices:
+            y[indices, a], y[indices, b] = (y[indices, b], y[indices, a])
+
+    return X ,y 
 
 
 
@@ -166,14 +174,48 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
         yield inputs[excerpt], targets[excerpt]
 
 
+
+def prediction(X):
+    """predict with trained network"""
+    input_var = T.tensor4('inputs')
+    print("Building model and compiling functions...")
+    network = build_cnn(input_var)
+
+    with np.load('model_convnet.npz') as f:
+        param_values = [f['arr_%d' % i] for i in range(len(f.files))]
+    lasagne.layers.set_all_param_values(network, param_values)
+
+    prediction = lasagne.layers.get_output(network, deterministic=True)
+    prediction = (prediction * 48) + 48
+    prediction_function = theano.function([input_var],prediction) 
+
+
+    return prediction_function(X)
+
+
+def para_updates(l_rate, moment, epoch, num_epochs):
+    #update parameter according to the number of epoch
+    # learning rate from 0.03 to 0.0001
+    #momentum from 0.9 to 0.999
+    l_rate_begin = 0.03
+    l_rate_end = 0.0001
+    moment_begin = 0.9
+    moment_end = 0.999
+
+    l_rate = ((l_rate_begin - l_rate_end) / num_epochs) * epoch + l_rate_begin
+    moment = ((moment_begin - moment_end) / num_epochs ) * epoch + moment_begin
+
+    return l_rate, moment 
+
+
+
 def main(num_epochs=500):
 	# Load the dataset
     print("Loading data...")
-    X_train, y_train, X_val, y_val = load2d()
+    X,y = load2d()
+    X_train, y_train, X_val, y_val = data_split(X,y, split = 0.2)
 
-	#print("X.shape == {}; X.min == {:.3f}; X.max == {:.3f}".format(X.shape, X.min(), X.max()))
-	#print("y.shape == {}; y.min == {:.3f}; y.max == {:.3f}".format(y.shape, y.min(), y.max()))
-
+	
     # Prepare Theano variables for inputs and targets
     #input_var = T.fmatrix('inputs')
     input_var = T.tensor4('inputs')
@@ -190,9 +232,26 @@ def main(num_epochs=500):
 
     # We could add some weight decay as well here, see lasagne.regularization.
 
+
+    #Learning rate decay & Momentum increase
+    l_rate_begin = np.float32(0.03)
+    l_rate_end = np.float32(0.0001)
+    moment_begin = np.float32(0.9)
+    moment_end = np.float32(0.999)
+
+    learning_rate = theano.shared(l_rate_begin)
+    momentum = theano.shared(moment_begin)
+
+    epo = T.scalar('epo', dtype='float32')
+    num_epo = T.scalar('num_epo', dtype='float32')
+    
+    update_learning_rate = theano.function([epo , num_epo], learning_rate, updates=[(learning_rate, ((l_rate_end - l_rate_begin) / num_epo) * epo + l_rate_begin)])
+    update_momentum = theano.function([epo , num_epo], momentum, updates=[(momentum, ((moment_end - moment_begin) / num_epo) * epo + moment_begin)])
+
+
     # Create update expressions for training
     params = lasagne.layers.get_all_params(network, trainable=True)
-    updates = lasagne.updates.nesterov_momentum(loss, params, learning_rate=0.01, momentum=0.9)
+    updates = lasagne.updates.nesterov_momentum(loss, params, learning_rate=learning_rate.get_value(), momentum=momentum.get_value())
 
     # Create a loss expression for validation/testing. The crucial difference
     # here is that we do a deterministic forward pass through the network,
@@ -213,8 +272,9 @@ def main(num_epochs=500):
     val_fn = theano.function([input_var, target_var], test_loss)
 
     #Initialize array to strore trainning and validation loss
-    t_loss = np.array(0.0)
-    v_loss = np.array(0.0)
+    t_loss = np.empty(num_epochs)
+    v_loss = np.empty(num_epochs)
+    axe_x = np.arange(num_epochs)
 
    # Launch the training loop.
     print("Starting training...")
@@ -223,6 +283,10 @@ def main(num_epochs=500):
         # In each epoch, we do a full pass over the training data:
         train_err = 0
         train_batches = 0
+
+        #Data augmentation with random flip
+        X_train, y_train = image_flip(X_train,y_train)
+
         start_time = time.time()
         for batch in iterate_minibatches(X_train, y_train, 200, shuffle=True):
             inputs, targets = batch
@@ -241,22 +305,29 @@ def main(num_epochs=500):
             #val_acc += acc
             val_batches += 1
 
-        train_loss = train_err / train_batches
-        valid_loss = val_err / val_batches
-        np.append(t_loss, train_loss)
-        np.append(v_loss, valid_loss)
+        t_loss[epoch] = train_err / train_batches
+        v_loss[epoch] = val_err / val_batches
+
+        #Update learning rate and momentum
+        update_learning_rate(np.float32(epoch), np.float32(num_epochs))
+        update_momentum(np.float32(epoch),np.float32(num_epochs))
+
 
         # Then we print the results for this epoch:
         print("Epoch {} of {} took {:.3f}s".format(epoch + 1, num_epochs, time.time() - start_time))
-        print("  training loss:\t\t{:.6f}".format(train_loss))
-        print("  validation loss:\t\t{:.6f}".format(valid_loss))
+        print("  training loss:\t\t{:.6f}".format(t_loss[epoch]))
+        print("  validation loss:\t\t{:.6f}".format(v_loss[epoch]))
         #print("  validation accuracy:\t\t{:.2f} %".format(val_acc / val_batches * 100))
 
-    print t_loss
-    print v_loss
 
     #Save all network parameters after training
     np.savez('model_simple_preceptron.npz', *lasagne.layers.get_all_param_values(network))
+
+    #with np.load('model_simple_preceptron.npz') as f:
+     #   param_values = [f['arr_%d' % i] for i in range(len(f.files))]
+      #  lasagne.layers.set_all_param_values(network, param_values)
+
+    #test_prediction = lasagne.layers.get_output(network, deterministic=True)
 
     # # After training, we compute and print the test error:
     # test_err = 0
@@ -274,10 +345,15 @@ def main(num_epochs=500):
     #     test_acc / test_batches * 100))
 
 
-
 if __name__ == '__main__':
-	main(5)
-	
-
+    #Training
+	main()
+    
+    # #Prediction
+    # print("Loading data...")
+    # X,y = load2d(test = True)
+    # print("Making prediction")
+    # pred_y =  prediction(X)
+    # ploting_img(X[1,0,:,:], np.array(1,1))
 
 
